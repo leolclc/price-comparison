@@ -1,0 +1,46 @@
+{
+  "data": {
+    "productsBySkuList": [
+      {
+        "sku": "59568",
+        "name": "Dipirona Monoidratada 500mg 10 comprimidos EMS Genérico",
+        "slug": "dipirona-monoidratada-500mg-10-comprimidos-ems-generico",
+        "liveComposition": {
+          "livePrice": {
+            "discountPercentage": 37.28,
+            "sku": "59568",
+            "type": "LMPM",
+            "valueFrom": 9.55,
+            "valueTo": 5.99,
+            "lmpmValueTo": 4.99,
+            "lmpmQty": 3
+          },
+          "liveStock": {
+            "sku": "59568",
+            "qty": 1
+          }
+        }
+      },
+      {
+        "sku": "824264",
+        "name": "Dipirona Monoidratada 1g Neo Química Genérico 10 Comprimidos",
+        "slug": "dipirona-monoidratada-1g-neo-quimica-generico-10-comprimidos",
+        "liveComposition": {
+          "livePrice": {
+            "discountPercentage": 0,
+            "sku": "824264",
+            "type": "REGULAR",
+            "valueFrom": 9.99,
+            "valueTo": 9.99,
+            "lmpmValueTo": null,
+            "lmpmQty": null
+          },
+          "liveStock": {
+            "sku": "824264",
+            "qty": 5
+          }
+        }
+      }
+    ]
+  }
+}

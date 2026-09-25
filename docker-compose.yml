@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: farmacompare_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-farmacompare}
+      POSTGRES_USER: ${POSTGRES_USER:-farma}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-farmapass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-farma} -d ${POSTGRES_DB:-farmacompare}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: farmacompare_backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-farma}:${POSTGRES_PASSWORD:-farmapass}@postgres:5432/${POSTGRES_DB:-farmacompare}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-farma}:${POSTGRES_PASSWORD:-farmapass}@postgres:5432/${POSTGRES_DB:-farmacompare}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./backend:/app
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  collector:
+    build:
+      context: ./collector
+      dockerfile: Dockerfile
+    container_name: farmacompare_collector
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-farma}:${POSTGRES_PASSWORD:-farmapass}@postgres:5432/${POSTGRES_DB:-farmacompare}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-farma}:${POSTGRES_PASSWORD:-farmapass}@postgres:5432/${POSTGRES_DB:-farmacompare}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    restart: unless-stopped
+    volumes:
+      - ./collector:/app
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: farmacompare_frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

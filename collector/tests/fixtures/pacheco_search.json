@@ -1,0 +1,73 @@
+{
+  "products": [
+    {
+      "productId": "841188",
+      "productName": "Dipirona Monoidratada 1g Genérico Cimed 10 Comprimidos",
+      "description": "Dipirona Monoidratada 1g Genérico Cimed 10 Comprimidos",
+      "linkText": "dipirona-monoidratada-1g-generico-cimed-10-comprimidos",
+      "brand": "Cimed",
+      "priceRange": {
+        "sellingPrice": {
+          "highPrice": 7.99,
+          "lowPrice": 7.99
+        },
+        "listPrice": {
+          "highPrice": 30.56,
+          "lowPrice": 30.56
+        }
+      },
+      "items": [
+        {
+          "itemId": "841188",
+          "ean": "7896422506528",
+          "sellers": []
+        }
+      ],
+      "specificationGroups": [
+        {
+          "name": "Especificações",
+          "specifications": [
+            {
+              "originalName": "Principio Ativo",
+              "values": ["Dipirona Monoidratada"]
+            },
+            {
+              "originalName": "Dosagem",
+              "values": ["1g"]
+            },
+            {
+              "originalName": "Forma Farmacêutica",
+              "values": ["Comprimido"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "productId": "123456",
+      "productName": "Dipirona Monoidratada 500mg EMS 10 Comprimidos",
+      "description": "Dipirona Monoidratada 500mg EMS 10 Comprimidos",
+      "linkText": "dipirona-monoidratada-500mg-ems-10-comprimidos",
+      "brand": "EMS",
+      "priceRange": {
+        "sellingPrice": {
+          "highPrice": 5.49,
+          "lowPrice": 5.49
+        },
+        "listPrice": {
+          "highPrice": 12.00,
+          "lowPrice": 12.00
+        }
+      },
+      "items": [
+        {
+          "itemId": "123456",
+          "ean": "7896714240102",
+          "sellers": []
+        }
+      ],
+      "specificationGroups": []
+    }
+  ],
+  "recordsFiltered": 2
+}

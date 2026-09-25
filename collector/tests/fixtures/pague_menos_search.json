@@ -1,0 +1,42 @@
+{
+  "products": [
+    {
+      "productId": "999001",
+      "productName": "Dipirona Monoidratada 500mg Neo Química 10 Comprimidos",
+      "brand": "Neo Química",
+      "link": "/dipirona-monoidratada-500mg-neo-quimica-10-comprimidos/p",
+      "items": [
+        {
+          "itemId": "999001",
+          "ean": "7896714240102",
+          "sellers": [
+            {
+              "sellerId": "1",
+              "sellerName": "Farmácias Pague Menos",
+              "sellerDefault": true,
+              "commertialOffer": {
+                "price": 8.89,
+                "listPrice": 29.52,
+                "priceWithoutDiscount": 8.89,
+                "discount": 70,
+                "discountLabel": "70% OFF",
+                "AvailableQuantity": 100,
+                "teasers": [
+                  {
+                    "name": "Leve 2 Pague Menos",
+                    "conditions": {
+                      "minimumQuantityKBackingField": "2"
+                    },
+                    "effects": {
+                      "discountKBackingField": 7.99
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
