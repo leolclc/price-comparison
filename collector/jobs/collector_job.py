@@ -15,6 +15,7 @@ from providers.pacheco import PachecoProvider
 from providers.pague_menos import PagueMenosProvider
 from providers.raia import RaiaProvider
 from providers.drogasil import DrogasilProvider
+from providers.playwright_drogaraia import PlaywrightDrogaraiaProvider
 
 logger = logging.getLogger("COLLECTOR")
 
@@ -28,6 +29,7 @@ class CollectorJob:
             AraujoProvider(),
             RaiaProvider(),
             DrogasilProvider(),
+            PlaywrightDrogaraiaProvider(),
         ]
 
     async def run(self, terms: list[str]) -> None:

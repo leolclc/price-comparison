@@ -1,34 +1,76 @@
-name: FarmaCompare - Coleta de Precos
+# GitHub Actions workflow to run the price‑comparison collectors
+#
+# This workflow installs the Python dependencies (including Playwright),
+# installs the Playwright Chromium browsers, optionally creates a SQLite
+# test database, and runs `collector/run_once.py`.
+#
+# It runs on every push to the `main` branch and on a schedule (default
+# every 6 hours).  Adjust the `cron` expression as needed.
+
+name: Collectors CI
 
 on:
+  push:
+    branches: [ main ]
   schedule:
-    # Executa a cada 6 horas (00:00, 06:00, 12:00, 18:00 UTC)
-    - cron: '0 */6 * * *'
-  workflow_dispatch: # Permite disparar manualmente pelo botao no GitHub
+    - cron: '0 */6 * * *'   # every 6 hours (UTC)
 
 jobs:
-  run-collector:
+  run-collectors:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+
+    env:
+      # For production you should store the real DB URL as a secret named DATABASE_URL
+      # and uncomment the line below.  The SQLite DB is only for CI testing.
+      DATABASE_URL: sqlite+aiosqlite:///test.db
+      # DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
     steps:
-      - name: Baixar codigo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configurar Python 3.12
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: 'collector/requirements.txt'
+          python-version: "3.12"
 
-      - name: Instalar dependencias do Collector
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('collector/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
         run: |
+          pip install --upgrade pip
           pip install -r collector/requirements.txt
 
-      - name: Executar Ciclo de Coleta
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          LOG_LEVEL: INFO
+      - name: Install Playwright browsers
+        run: |
+          python -m playwright install chromium
+
+      # Optional: create SQLite schema for CI testing
+      - name: Initialise SQLite schema (if using SQLite)
+        if: ${{ env.DATABASE_URL == 'sqlite+aiosqlite:///test.db' }}
+        run: |
+          python - <<PY
+import asyncio, os
+from app.core.database import engine, Base
+async def create():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+asyncio.run(create())
+PY
+
+      - name: Run collector (run_once.py)
         run: |
           python collector/run_once.py
+
+      - name: Upload collector logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collector-logs
+          path: collector/*.log
