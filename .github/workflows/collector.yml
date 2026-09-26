@@ -56,13 +56,13 @@ jobs:
         if: ${{ env.DATABASE_URL == 'sqlite+aiosqlite:///test.db' }}
         run: |
           python - <<PY
-import asyncio, os
-from app.core.database import engine, Base
-async def create():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-asyncio.run(create())
-PY
+          import asyncio, os
+          from app.core.database import engine, Base
+          async def create():
+              async with engine.begin() as conn:
+                  await conn.run_sync(Base.metadata.create_all)
+          asyncio.run(create())
+          PY
 
       - name: Run collector (run_once.py)
         run: |
