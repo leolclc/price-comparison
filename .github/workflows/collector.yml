@@ -24,6 +24,7 @@ jobs:
       # For production you should store the real DB URL as a secret named DATABASE_URL
       # and uncomment the line below.  The SQLite DB is only for CI testing.
       DATABASE_URL: sqlite+aiosqlite:///test.db
+      PYTHONPATH: ${{ github.workspace }}/backend
       # DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
     steps:
@@ -56,6 +57,7 @@ jobs:
       - name: Initialise SQLite schema (if using SQLite)
         if: ${{ env.DATABASE_URL == 'sqlite+aiosqlite:///test.db' }}
         run: |
+          export PYTHONPATH="${PYTHONPATH}:${{ github.workspace }}/backend"
           python - <<PY
           import asyncio, os
           from app.core.database import engine, Base
@@ -64,6 +66,8 @@ jobs:
                   await conn.run_sync(Base.metadata.create_all)
           asyncio.run(create())
           PY
+          
+          sqlite3 test.db < database/init.sql
 
       - name: Run collector (run_once.py)
         run: |
