@@ -9,6 +9,12 @@
 
 name: Collectors CI
 
+# Prevent a push and the schedule from running two collectors against the
+# pharmacy sites at the same time.
+concurrency:
+  group: pharmacy-collector
+  cancel-in-progress: false
+
 on:
   push:
     branches: [ master, main ]

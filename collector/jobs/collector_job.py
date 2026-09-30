@@ -22,6 +22,7 @@ logger = logging.getLogger("COLLECTOR")
 class CollectorJob:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._pharmacy_ids: dict[str, int] = {}
         self._providers = [
             PachecoProvider(),
             PagueMenosProvider(),
@@ -32,8 +33,12 @@ class CollectorJob:
 
     async def run(self, terms: list[str]) -> None:
         logger.info(f"Starting collection for {len(terms)} terms")
+        await self._ensure_pharmacies()
 
         all_candidates: list[ProductCandidate] = []
+        candidates_by_provider: dict[object, list[list[ProductCandidate]]] = {
+            provider: [] for provider in self._providers
+        }
 
         try:
             for provider in self._providers:
@@ -41,6 +46,8 @@ class CollectorJob:
                     try:
                         candidates = await provider.search(term)
                         all_candidates.extend(candidates)
+                        if candidates:
+                            candidates_by_provider[provider].append(candidates)
                         logger.info(
                             f"[{provider.name}] search term={term} products={len(candidates)}"
                         )
@@ -49,20 +56,36 @@ class CollectorJob:
                         logger.error(
                             f"[{provider.name}] Error searching term={term}: {e}"
                         )
+            if not all_candidates:
+                logger.warning("No candidates collected")
+                return
+
+            groups = group_candidates(all_candidates)
+            logger.info(f"Grouped into {len(groups)} unique products")
+            await self._persist_candidates(groups)
+
+            # Discovery only creates products. Fetching and persisting the offers in
+            # the same cycle makes the prices and destination links available to the UI.
+            for provider, batches in candidates_by_provider.items():
+                if not batches:
+                    continue
+                for candidates in batches:
+                    try:
+                        offers = await provider.get_prices(candidates)
+                        await self._persist_offers(offers)
+                        logger.info(
+                            "[%s] collected offers=%s", provider.name, len(offers)
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "[%s] Error collecting prices: %s", provider.name, e
+                        )
         finally:
             await self._close_providers()
 
-        if not all_candidates:
-            logger.warning("No candidates collected")
-            return
-
-        groups = group_candidates(all_candidates)
-        logger.info(f"Grouped into {len(groups)} unique products")
-
-        await self._persist_candidates(groups)
-
     async def run_price_update(self, terms: list[str]) -> None:
         logger.info("Starting price update")
+        await self._ensure_pharmacies()
 
         try:
             for provider in self._providers:
@@ -101,6 +124,28 @@ class CollectorJob:
                     await close()
                 except Exception as e:
                     logger.warning("Failed to close %s: %s", provider.name, e)
+
+    async def _ensure_pharmacies(self) -> None:
+        """Create records missing from databases initialized before newer providers."""
+        from app_models import Pharmacy
+
+        for provider in self._providers:
+            result = await self._session.execute(
+                select(Pharmacy).where(Pharmacy.slug == provider.slug)
+            )
+            pharmacy = result.scalar_one_or_none()
+            if pharmacy is None:
+                pharmacy = Pharmacy(name=provider.name, slug=provider.slug, active=True)
+                self._session.add(pharmacy)
+                await self._session.flush()
+                logger.info(
+                    "Created missing pharmacy name=%s slug=%s",
+                    provider.name,
+                    provider.slug,
+                )
+            self._pharmacy_ids[provider.slug] = pharmacy.id
+
+        await self._session.commit()
 
     async def _persist_candidates(
         self, groups: list[list[ProductCandidate]]
@@ -171,6 +216,10 @@ class CollectorJob:
         return max(group, key=richness)
 
     async def _get_pharmacy_id(self, slug: str) -> int | None:
+        cached_id = self._pharmacy_ids.get(slug)
+        if cached_id is not None:
+            return cached_id
+
         from sqlalchemy import select as sa_select
         from app_models import Pharmacy
 
@@ -178,7 +227,10 @@ class CollectorJob:
             sa_select(Pharmacy).where(Pharmacy.slug == slug)
         )
         pharmacy = result.scalar_one_or_none()
-        return pharmacy.id if pharmacy else None
+        if pharmacy:
+            self._pharmacy_ids[slug] = pharmacy.id
+            return pharmacy.id
+        return None
 
     async def _upsert_product(self, candidate: ProductCandidate) -> int:
         from app_models import Product

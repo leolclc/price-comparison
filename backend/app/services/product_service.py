@@ -73,7 +73,9 @@ class ProductService:
                 key=lambda o: (not o.available, o.price),
             )
             offers_schema = [_offer_to_schema(o) for o in sorted_offers]
-            product_schemas.append(_product_to_schema(product, offers_schema))
+            # Products discovered without a current offer cannot be compared or bought.
+            if any(offer.available for offer in offers_schema):
+                product_schemas.append(_product_to_schema(product, offers_schema))
 
         # Sort products by lowest available price
         def min_price(p: ProductSchema) -> float:

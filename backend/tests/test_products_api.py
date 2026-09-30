@@ -71,6 +71,22 @@ async def test_search_with_product(client, db_session):
 
 
 @pytest.mark.asyncio
+async def test_search_hides_products_without_available_offer(client, db_session):
+    product = Product(
+        name="Paracetamol 500mg",
+        normalized_name="paracetamol 500mg",
+    )
+    db_session.add(product)
+    await db_session.commit()
+
+    response = await client.get("/api/products/search?q=paracetamol")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+    assert response.json()["products"] == []
+
+
+@pytest.mark.asyncio
 async def test_get_product_not_found(client):
     response = await client.get("/api/products/99999")
     assert response.status_code == 404

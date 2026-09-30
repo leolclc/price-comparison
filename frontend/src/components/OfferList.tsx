@@ -20,6 +20,9 @@ export const OfferList: React.FC<OfferListProps> = ({ offers }) => {
     .filter((o) => o.available)
     .map((o) => parseFloat(o.price));
   const minPrice = availablePrices.length > 0 ? Math.min(...availablePrices) : null;
+  const bestOffer = offers
+    .filter((offer) => offer.available)
+    .sort((a, b) => parseFloat(a.price) - parseFloat(b.price))[0];
 
   const formatDate = (isoString: string) => {
     try {
@@ -39,7 +42,7 @@ export const OfferList: React.FC<OfferListProps> = ({ offers }) => {
     <table className="offers-table">
       <thead>
         <tr>
-          <th>Farmácia</th>
+          <th>Melhor loja</th>
           <th>Preço</th>
           <th>Promoção</th>
           <th>Última Coleta</th>
@@ -47,7 +50,7 @@ export const OfferList: React.FC<OfferListProps> = ({ offers }) => {
         </tr>
       </thead>
       <tbody>
-        {offers.map((offer) => {
+        {[bestOffer].filter((offer): offer is Offer => Boolean(offer)).map((offer) => {
           const priceNum = parseFloat(offer.price);
           const isCheapest = minPrice !== null && priceNum === minPrice && offer.available;
 

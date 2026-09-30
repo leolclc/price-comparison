@@ -1,8 +1,10 @@
 """Shared Playwright browser session for rendered pharmacy pages."""
 
+import asyncio
 import logging
 import os
 
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 
@@ -19,8 +21,11 @@ def _env_flag(name: str, default: bool) -> bool:
 class BrowserPageFetcher:
     """Reuse one Chromium instance while loading individual search pages."""
 
-    def __init__(self, timeout_seconds: float = 45.0) -> None:
+    def __init__(
+        self, timeout_seconds: float = 45.0, max_navigation_attempts: int = 3
+    ) -> None:
         self._timeout_ms = int(timeout_seconds * 1000)
+        self._max_navigation_attempts = max_navigation_attempts
         self._headless = _env_flag("COLLECTOR_BROWSER_HEADLESS", True)
         self._playwright = None
         self._browser = None
@@ -33,7 +38,11 @@ class BrowserPageFetcher:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
             headless=self._headless,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-http2",
+            ],
         )
         self._context = await self._browser.new_context(
             locale="pt-BR",
@@ -48,6 +57,41 @@ class BrowserPageFetcher:
         *,
         wait_for_selector: str | None = None,
         selector_timeout_ms: int = 20_000,
+    ) -> str:
+        for attempt in range(1, self._max_navigation_attempts + 1):
+            try:
+                return await self._fetch_page_once(
+                    url,
+                    wait_for_selector=wait_for_selector,
+                    selector_timeout_ms=selector_timeout_ms,
+                )
+            except PermissionError:
+                # A 403 is a server-side denial. Retrying immediately only increases
+                # traffic and does not turn it into a successful request.
+                raise
+            except PlaywrightError as error:
+                if attempt == self._max_navigation_attempts:
+                    raise
+
+                logger.warning(
+                    "Navigation failed (attempt %s/%s) for %s: %s. "
+                    "Restarting Chromium before retrying.",
+                    attempt,
+                    self._max_navigation_attempts,
+                    url,
+                    error,
+                )
+                await self.close()
+                await asyncio.sleep(2**attempt)
+
+        raise RuntimeError("Navigation retry loop ended unexpectedly")
+
+    async def _fetch_page_once(
+        self,
+        url: str,
+        *,
+        wait_for_selector: str | None,
+        selector_timeout_ms: int,
     ) -> str:
         await self._ensure_started()
         page = await self._context.new_page()
