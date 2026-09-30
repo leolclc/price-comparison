@@ -7,7 +7,7 @@ Sistema de comparação de preços de farmácias com foco inicial em **Belo Hori
 * **Drogaria Pacheco**
 * **Drogasil**
 
-O sistema coleta preços em segundo plano via **Collector**, armazena as ofertas e produtos no **PostgreSQL**, e disponibiliza uma API REST rápida em **FastAPI** consultada por um frontend em **React + TypeScript + Vite**.
+O sistema coleta preços em segundo plano via **Collector**, armazena as ofertas e produtos no **PostgreSQL**, e disponibiliza uma API REST rápida em **FastAPI** consultada por um frontend em **React + TypeScript + Vite**. Araujo e Drogaria Raia usam Chromium via Playwright para renderizar as páginas de busca.
 
 ---
 
@@ -39,6 +39,10 @@ O sistema coleta preços em segundo plano via **Collector**, armazena as ofertas
 ---
 
 ## 🚀 Como Executar com Docker Compose
+
+O collector usa Chromium headless por padrão (`COLLECTOR_BROWSER_HEADLESS=true`). No GitHub Actions, o workflow abre o Chromium em modo gráfico numa tela virtual Xvfb, como na execução local com interface gráfica.
+
+Para que a coleta agendada use os termos e grave resultados no banco da aplicação, configure o secret `DATABASE_URL` no repositório com a URL PostgreSQL acessível pelo GitHub Actions. Sem esse secret, o workflow usa um SQLite temporário apenas para CI.
 
 ### 1. Pré-requisitos
 * Docker e Docker Compose instalados.

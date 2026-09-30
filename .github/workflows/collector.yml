@@ -21,11 +21,12 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # For production you should store the real DB URL as a secret named DATABASE_URL
-      # and uncomment the line below.  The SQLite DB is only for CI testing.
-      DATABASE_URL: sqlite+aiosqlite:///test.db
+      # Set a repository secret named DATABASE_URL to collect from the app's database.
+      # The ephemeral SQLite database is only a fallback for CI without that secret.
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'sqlite+aiosqlite:///test.db' }}
       PYTHONPATH: ${{ github.workspace }}/backend
-      # DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      # Run Chromium in headed mode on a virtual display, matching the local GUI run.
+      COLLECTOR_BROWSER_HEADLESS: "false"
 
     steps:
       - name: Checkout repository
@@ -51,7 +52,9 @@ jobs:
 
       - name: Install Playwright browsers
         run: |
-          python -m playwright install chromium
+          sudo apt-get update
+          sudo apt-get install --yes xvfb
+          python -m playwright install --with-deps chromium
 
       # Optional: create SQLite schema for CI testing
       - name: Initialise SQLite schema (if using SQLite)
@@ -71,7 +74,7 @@ jobs:
 
       - name: Run collector (run_once.py)
         run: |
-          python collector/run_once.py
+          xvfb-run --auto-servernum --server-args="-screen 0 1365x900x24" python collector/run_once.py
 
       - name: Upload collector logs (always)
         if: always()

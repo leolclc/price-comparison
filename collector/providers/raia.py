@@ -1,95 +1,47 @@
+import html
 import json
 import logging
 from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlencode
 
-import httpx
+from bs4 import BeautifulSoup
 
 from models.common import ProductCandidate, ProductOffer
 from providers.base import PharmacyProvider
+from providers.browser import BrowserPageFetcher
 
 logger = logging.getLogger("RAIA")
 
 BASE_URL = "https://www.drogaraia.com.br"
-GRAPHQL_URL = f"{BASE_URL}/api/next/busca/graphql"
-SEARCH_URL = f"{BASE_URL}/api/io/_v/api/intelligent-search/product_search/trade-policy/1"
-
-PRODUCT_BY_SKU_QUERY = """
-query ProductBySkuList($skuList: [String!]!, $origin: String) {
-  productsBySkuList(skuList: $skuList, origin: $origin) {
-    sku
-    name
-    slug
-    liveComposition {
-      livePrice {
-        discountPercentage
-        sku
-        type
-        valueFrom
-        valueTo
-        lmpmValueTo
-        lmpmQty
-      }
-      liveStock {
-        sku
-        qty
-      }
-    }
-  }
-}
-"""
+SEARCH_URL = f"{BASE_URL}/busca"
 
 
 class RaiaProvider(PharmacyProvider):
     name = "Drogaria Raia"
     slug = "raia"
 
-    def __init__(self, timeout: float = 15.0, max_retries: int = 3) -> None:
-        self._timeout = timeout
-        self._max_retries = max_retries
-        self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout),
-            headers={
-                "User-Agent": "Mozilla/5.0 (compatible; FarmaCompare/1.0)",
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
-            follow_redirects=True,
+    def __init__(self, timeout: float = 45.0) -> None:
+        self._browser = BrowserPageFetcher(timeout_seconds=timeout)
+
+    async def _fetch_search_page(self, term: str) -> str:
+        query = urlencode({"q": term, "lang": "pt_BR"})
+        return await self._browser.fetch_page(
+            f"{SEARCH_URL}?{query}",
+            wait_for_selector="[data-gtmga4data][data-pid]",
         )
+
+    async def close(self) -> None:
+        await self._browser.close()
 
     async def search(self, term: str) -> list[ProductCandidate]:
         logger.info(f"search term={term}")
         candidates: list[ProductCandidate] = []
 
         try:
-            for attempt in range(self._max_retries):
-                try:
-                    params = {"query": term, "count": 48, "page": 1}
-                    response = await self._client.get(SEARCH_URL, params=params)
-                    response.raise_for_status()
-                    data = response.json()
-                    break
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code in (429, 503) and attempt < self._max_retries - 1:
-                        import asyncio
-                        await asyncio.sleep(2 ** attempt)
-                        continue
-                    logger.error(
-                        f"HTTP error status={e.response.status_code} url={SEARCH_URL}"
-                    )
-                    return candidates
-                except httpx.RequestError as e:
-                    logger.error(f"Request error url={SEARCH_URL} error={e}")
-                    return candidates
-            else:
-                return candidates
-
-            products_data = data.get("products", [])
-            for product in products_data:
-                candidate = self._parse_search_product(product)
-                if candidate:
-                    candidates.append(candidate)
+            html_content = await self._fetch_search_page(term)
+            candidates = self._parse_html(html_content)
 
             logger.info(f"search term={term} products={len(candidates)}")
         except Exception as e:
@@ -104,40 +56,111 @@ class RaiaProvider(PharmacyProvider):
         if not products:
             return []
 
-        sku_list = [p.external_id for p in products]
         now = datetime.now(timezone.utc)
+        term = products[0].name.split()[0] if products[0].name else ""
+        try:
+            html_content = await self._fetch_search_page(term)
+            offers = self._parse_html_offers(
+                html_content,
+                {product.external_id for product in products},
+                now,
+            )
+            logger.info("price update skus=%s offers=%s", len(products), len(offers))
+            return offers
+        except Exception as e:
+            logger.error("Error getting Raia prices: %s", e)
+            return []
+
+    def _parse_html(self, html_content: str) -> list[ProductCandidate]:
+        candidates: list[ProductCandidate] = []
+        soup = BeautifulSoup(html_content, "lxml")
+        for container in soup.find_all(attrs={"data-gtmga4data": True}):
+            pid = container.get("data-pid", "")
+            gtm_data = self._parse_gtm_data(container.get("data-gtmga4data", ""))
+            if not pid or not gtm_data:
+                continue
+
+            name = gtm_data.get("item_name", "")
+            if not name:
+                continue
+
+            link = container.find("a", href=True)
+            href = link["href"] if link else ""
+            url = (
+                href
+                if href.startswith("http")
+                else f"{BASE_URL}{href}"
+                if href
+                else None
+            )
+            ean = gtm_data.get("item_ean") or gtm_data.get("ean")
+            candidates.append(
+                ProductCandidate(
+                    pharmacy=self.slug,
+                    external_id=str(pid),
+                    name=name,
+                    brand=gtm_data.get("item_brand"),
+                    ean=str(ean) if ean else None,
+                    url=url,
+                )
+            )
+        return candidates
+
+    def _parse_html_offers(
+        self, html_content: str, seen_ids: set[str], now: datetime
+    ) -> list[ProductOffer]:
         offers: list[ProductOffer] = []
-
-        batch_size = 20
-        for i in range(0, len(sku_list), batch_size):
-            batch = sku_list[i : i + batch_size]
-            try:
-                graphql_data = await self._fetch_graphql_prices(batch)
-                for item in graphql_data:
-                    offer = self._graphql_to_offer(item, now)
-                    if offer:
-                        offers.append(offer)
-            except Exception as e:
-                logger.error(f"Error getting prices for batch {i}: {e}")
-
-        logger.info(f"price update skus={len(sku_list)} offers={len(offers)}")
+        soup = BeautifulSoup(html_content, "lxml")
+        for container in soup.find_all(attrs={"data-gtmga4data": True}):
+            pid = str(container.get("data-pid", ""))
+            if not pid or pid not in seen_ids:
+                continue
+            gtm_data = self._parse_gtm_data(container.get("data-gtmga4data", ""))
+            if not gtm_data:
+                continue
+            offer = self._gtm_to_offer(gtm_data, pid, now)
+            if offer:
+                offers.append(offer)
         return offers
 
-    async def _fetch_graphql_prices(
-        self, sku_list: list[str]
-    ) -> list[dict[str, Any]]:
+    def _parse_gtm_data(self, raw: str) -> dict[str, Any] | None:
+        if not raw:
+            return None
         try:
-            payload = {
-                "query": PRODUCT_BY_SKU_QUERY,
-                "variables": {"skuList": sku_list, "origin": "search"},
-            }
-            response = await self._client.post(GRAPHQL_URL, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("data", {}).get("productsBySkuList", [])
-        except Exception as e:
-            logger.error(f"GraphQL error: {e}")
-            return []
+            return json.loads(html.unescape(raw))
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    def _gtm_to_offer(
+        self, gtm_data: dict[str, Any], pid: str, now: datetime
+    ) -> ProductOffer | None:
+        price = gtm_data.get("price")
+        if price is None:
+            return None
+
+        try:
+            price = Decimal(str(price))
+            list_price_value = gtm_data.get("item_list_price") or gtm_data.get(
+                "list_price"
+            )
+            list_price = Decimal(str(list_price_value)) if list_price_value else None
+            discount = None
+            if list_price and list_price > price:
+                discount = ((list_price - price) / list_price * 100).quantize(
+                    Decimal("0.01")
+                )
+            return ProductOffer(
+                pharmacy=self.slug,
+                external_id=pid,
+                price=price,
+                list_price=list_price,
+                available=True,
+                discount_percentage=discount,
+                collected_at=now,
+            )
+        except (ArithmeticError, ValueError, TypeError) as e:
+            logger.warning("Failed to parse Raia offer for %s: %s", pid, e)
+            return None
 
     def _parse_search_product(
         self, product: dict[str, Any]

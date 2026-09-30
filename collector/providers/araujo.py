@@ -1,16 +1,16 @@
 import html
 import json
 import logging
-import re
+from urllib.parse import urlencode
 from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Any
 
-import httpx
 from bs4 import BeautifulSoup
 
 from models.common import ProductCandidate, ProductOffer
 from providers.base import PharmacyProvider
+from providers.browser import BrowserPageFetcher
 
 logger = logging.getLogger("ARAUJO")
 
@@ -22,46 +22,25 @@ class AraujoProvider(PharmacyProvider):
     name = "Araujo"
     slug = "araujo"
 
-    def __init__(self, timeout: float = 15.0, max_retries: int = 3) -> None:
-        self._timeout = timeout
-        self._max_retries = max_retries
-        self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout),
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "pt-BR,pt;q=0.9",
-            },
-            follow_redirects=True,
+    def __init__(self, timeout: float = 45.0) -> None:
+        self._browser = BrowserPageFetcher(timeout_seconds=timeout)
+
+    async def _fetch_search_page(self, term: str) -> str:
+        query = urlencode({"q": term, "lang": "pt_BR"})
+        return await self._browser.fetch_page(
+            f"{SEARCH_URL}?{query}",
+            wait_for_selector="[data-gtmga4data][data-pid]",
         )
+
+    async def close(self) -> None:
+        await self._browser.close()
 
     async def search(self, term: str) -> list[ProductCandidate]:
         logger.info(f"search term={term}")
         candidates: list[ProductCandidate] = []
 
         try:
-            for attempt in range(self._max_retries):
-                try:
-                    params = {"q": term, "lang": "pt_BR"}
-                    response = await self._client.get(SEARCH_URL, params=params)
-                    response.raise_for_status()
-                    html_content = response.text
-                    break
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code in (429, 503) and attempt < self._max_retries - 1:
-                        import asyncio
-                        await asyncio.sleep(2 ** attempt)
-                        continue
-                    logger.error(
-                        f"HTTP error status={e.response.status_code} url={SEARCH_URL}"
-                    )
-                    return candidates
-                except httpx.RequestError as e:
-                    logger.error(f"Request error url={SEARCH_URL} error={e}")
-                    return candidates
-            else:
-                return candidates
-
+            html_content = await self._fetch_search_page(term)
             candidates = self._parse_html(html_content)
             logger.info(f"parsed products={len(candidates)}")
         except Exception as e:
@@ -79,10 +58,7 @@ class AraujoProvider(PharmacyProvider):
 
         term = products[0].name.split()[0] if products[0].name else ""
         try:
-            params = {"q": term, "lang": "pt_BR"}
-            response = await self._client.get(SEARCH_URL, params=params)
-            response.raise_for_status()
-            html_content = response.text
+            html_content = await self._fetch_search_page(term)
 
             now = datetime.now(timezone.utc)
             seen_ids = {p.external_id for p in products}

@@ -15,7 +15,6 @@ from providers.pacheco import PachecoProvider
 from providers.pague_menos import PagueMenosProvider
 from providers.raia import RaiaProvider
 from providers.drogasil import DrogasilProvider
-from providers.playwright_drogaraia import PlaywrightDrogaraiaProvider
 
 logger = logging.getLogger("COLLECTOR")
 
@@ -29,7 +28,6 @@ class CollectorJob:
             AraujoProvider(),
             RaiaProvider(),
             DrogasilProvider(),
-            PlaywrightDrogaraiaProvider(),
         ]
 
     async def run(self, terms: list[str]) -> None:
@@ -37,19 +35,22 @@ class CollectorJob:
 
         all_candidates: list[ProductCandidate] = []
 
-        for provider in self._providers:
-            for term in terms:
-                try:
-                    candidates = await provider.search(term)
-                    all_candidates.extend(candidates)
-                    logger.info(
-                        f"[{provider.name}] search term={term} products={len(candidates)}"
-                    )
-                    await asyncio.sleep(0.5)
-                except Exception as e:
-                    logger.error(
-                        f"[{provider.name}] Error searching term={term}: {e}"
-                    )
+        try:
+            for provider in self._providers:
+                for term in terms:
+                    try:
+                        candidates = await provider.search(term)
+                        all_candidates.extend(candidates)
+                        logger.info(
+                            f"[{provider.name}] search term={term} products={len(candidates)}"
+                        )
+                        await asyncio.sleep(0.5)
+                    except Exception as e:
+                        logger.error(
+                            f"[{provider.name}] Error searching term={term}: {e}"
+                        )
+        finally:
+            await self._close_providers()
 
         if not all_candidates:
             logger.warning("No candidates collected")
@@ -63,31 +64,43 @@ class CollectorJob:
     async def run_price_update(self, terms: list[str]) -> None:
         logger.info("Starting price update")
 
-        for provider in self._providers:
-            try:
-                from app_db import get_pharmacy_products_for_provider
-                products = await get_pharmacy_products_for_provider(
-                    self._session, provider.slug
-                )
-                if not products:
-                    continue
-
-                candidates = [
-                    ProductCandidate(
-                        pharmacy=provider.slug,
-                        external_id=p["external_id"],
-                        name=p["external_name"],
+        try:
+            for provider in self._providers:
+                try:
+                    from app_db import get_pharmacy_products_for_provider
+                    products = await get_pharmacy_products_for_provider(
+                        self._session, provider.slug
                     )
-                    for p in products
-                ]
+                    if not products:
+                        continue
 
-                offers = await provider.get_prices(candidates)
-                await self._persist_offers(offers)
-                logger.info(
-                    f"[{provider.name}] price update offers={len(offers)}"
-                )
-            except Exception as e:
-                logger.error(f"[{provider.name}] Error in price update: {e}")
+                    candidates = [
+                        ProductCandidate(
+                            pharmacy=provider.slug,
+                            external_id=p["external_id"],
+                            name=p["external_name"],
+                        )
+                        for p in products
+                    ]
+
+                    offers = await provider.get_prices(candidates)
+                    await self._persist_offers(offers)
+                    logger.info(
+                        f"[{provider.name}] price update offers={len(offers)}"
+                    )
+                except Exception as e:
+                    logger.error(f"[{provider.name}] Error in price update: {e}")
+        finally:
+            await self._close_providers()
+
+    async def _close_providers(self) -> None:
+        for provider in self._providers:
+            close = getattr(provider, "close", None)
+            if close:
+                try:
+                    await close()
+                except Exception as e:
+                    logger.warning("Failed to close %s: %s", provider.name, e)
 
     async def _persist_candidates(
         self, groups: list[list[ProductCandidate]]
